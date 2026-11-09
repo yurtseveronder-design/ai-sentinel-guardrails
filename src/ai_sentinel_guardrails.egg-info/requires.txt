@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+pydantic
+PyYAML
+httpx
+
+[test]
+pytest
+pytest-asyncio
+deepeval

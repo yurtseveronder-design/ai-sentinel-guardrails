@@ -1,0 +1,2 @@
+[console_scripts]
+ai-sentinel = ai_sentinel.cli:main

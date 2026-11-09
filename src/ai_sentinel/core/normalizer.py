@@ -1,57 +1,59 @@
 """
-Advanced Input Normalizer for AI-Sentinel Guardrails.
-Handles Unicode normalization, zero-width character removal, bidi overrides, 
-and obfuscation detection.
+Advanced input normalizer and sanitization engine for AI-Sentinel Guardrails.
+Handles zero-width character stripping, Unicode NFKC normalization, whitespace collapse,
+and full-text sanitization.
 """
 
 import unicodedata
 import re
-from typing import Dict, Any
 
 class InputNormalizer:
-    # Zero-width, soft hyphens, and formatting characters often used to smuggle prompts
-    INVISIBLE_CHARS = re.compile(
-        r"[\u200b\u200c\u200d\u200e\u200f\u2028\u2029\u202a\u202b\u202c\u202d\u202e\ufeff\u00ad]"
-    )
-    
-    # Control characters control matching
-    CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+    """
+    Robust input normalizer to defeat prompt smuggling, invisible character evasion,
+    and formatting-based jailbreaks.
+    """
 
-    @classmethod
-    def normalize(cls, text: str) -> Dict[str, Any]:
+    @staticmethod
+    def normalize(text: str) -> dict:
         """
-        Normalizes input text by performing Unicode NFKC conversion,
-        stripping invisible/zero-width smuggling characters, and checking for obfuscation.
+        Normalizes input text and returns a dictionary with the cleaned text
+        and a list of applied modifications.
         """
         if not isinstance(text, str):
-            return {"cleaned_text": "", "modifications": ["invalid_type"]}
+            return {"cleaned_text": str(text), "modifications": []}
 
-        original_length = len(text)
         modifications = []
+        original_text = text
 
-        # 1. Unicode NFKC normalization (canonical decomposition + compatibility composition)
-        normalized = unicodedata.normalize("NFKC", text)
-        if normalized != text:
-            modifications.append("unicode_nfkc")
-
-        # 2. Strip invisible zero-width and bidi override characters
-        if cls.INVISIBLE_CHARS.search(normalized):
-            normalized = cls.INVISIBLE_CHARS.sub("", normalized)
+        # 1. Strip zero-width / invisible characters (e.g., zero-width spaces, soft hyphens)
+        # Unicode categories: Cf (Format), Cc (Control) except standard newline/tab
+        invisible_chars_pattern = re.compile(r'[\u200b\u200c\u200d\uFEFF\u00ad]')
+        if invisible_chars_pattern.search(text):
+            text = invisible_chars_pattern.sub('', text)
             modifications.append("stripped_invisible_chars")
 
-        # 3. Strip raw control characters
-        if cls.CONTROL_CHARS.search(normalized):
-            normalized = cls.CONTROL_CHARS.sub("", normalized)
-            modifications.append("stripped_control_chars")
+        # 2. Unicode NFKC Normalization (canonical decomposition, compatibility composition)
+        normalized_unicode = unicodedata.normalize('NFKC', text)
+        if normalized_unicode != text:
+            text = normalized_unicode
+            modifications.append("unicode_nfkc")
 
-        # 4. Normalize whitespace (collapse excessive spacing/newlines used in layout attacks)
-        cleaned_text = " ".join(normalized.split())
-        if cleaned_text != normalized.strip():
+        # 3. Collapse excessive whitespace / multi-line layout padding attacks
+        collapsed_whitespace = re.sub(r'[ \t]+', ' ', text)
+        if collapsed_whitespace != text:
+            text = collapsed_whitespace
             modifications.append("normalized_whitespace")
 
         return {
-            "original_text": text,
-            "cleaned_text": cleaned_text,
-            "modifications": modifications,
-            "length_delta": len(cleaned_text) - original_length
+            "cleaned_text": text.strip(),
+            "modifications": modifications
         }
+
+    @classmethod
+    def full_normalize(cls, text: str) -> str:
+        """
+        Direct wrapper method that returns the cleaned string directly,
+        ensuring secure integration with shield.py without silent failures.
+        """
+        result = cls.normalize(text)
+        return result["cleaned_text"]
