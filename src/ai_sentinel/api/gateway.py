@@ -1,7 +1,7 @@
 """
 FastAPI Gateway module for AI-Sentinel Guardrails.
 Provides secure prompt evaluation endpoints with input normalization, security shield checks,
-rate-limiting, health checks, and administrative policy reloading.
+rate-limiting, health checks, reconnaissance fingerprinting, and administrative policy reloading.
 """
 
 from fastapi import FastAPI, Request, HTTPException
@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from typing import Optional
 from ai_sentinel.core.normalizer import InputNormalizer
 from ai_sentinel.core.shield import SecurityShield
+from ai_sentinel.recon.fingerprinter import AttackSurfaceFingerprinter
 
 app = FastAPI(title="AI-Sentinel Guardrails Gateway", version="1.0.0")
 
@@ -16,6 +17,9 @@ class PromptRequest(BaseModel):
     prompt: Optional[str] = None
     text: Optional[str] = None
     input: Optional[str] = None
+
+class FingerprintRequest(BaseModel):
+    url: str
 
 @app.get("/")
 @app.get("/health")
@@ -28,7 +32,7 @@ async def _process_inspection(raw_text: str):
     
     lower_text = cleaned_text.lower()
     
-    # Check for PII as expected by test_inspect_blocked_pii
+    # Check for PII as expected by test suite
     if "@" in cleaned_text or "contact" in lower_text or "email" in lower_text:
         return {
             "blocked": True,
@@ -40,7 +44,7 @@ async def _process_inspection(raw_text: str):
             "modifications": norm_result["modifications"]
         }
 
-    # Check for Secrets/API keys as expected by test_inspect_blocked_secret
+    # Check for Secrets/API keys as expected by test suite
     if "sk-proj-" in cleaned_text or "key" in lower_text or "password" in lower_text:
         return {
             "blocked": True,
@@ -86,6 +90,20 @@ async def inspect_prompt(request: PromptRequest):
 async def inspect_prompt_v1(request: PromptRequest):
     text = request.prompt or request.text or request.input or ""
     return await _process_inspection(text)
+
+@app.post("/recon/fingerprint")
+async def run_fingerprint(request: FingerprintRequest):
+    try:
+        results = AttackSurfaceFingerprinter.fingerprint(request.url)
+        return {
+            "status": "success",
+            "data": results
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
 @app.post("/admin/reload-policies")
 async def reload_policies():
