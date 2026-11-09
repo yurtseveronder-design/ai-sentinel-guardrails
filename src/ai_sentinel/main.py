@@ -16,14 +16,18 @@ from ai_sentinel.guardrails.plugins import (
 
 app = FastAPI(title="AI-Sentinel Guardrail Gateway", version="1.0.0")
 
-# Initialize and configure pipeline with input and output guardrails
+# Initialize and configure pipeline with complete input and output guardrails
 pipeline = GuardrailPipeline()
+
+# --- Input Guardrails (Inspecting User Prompts / Requests) ---
 pipeline.add_input_guardrail(PromptInjectionGuardrail(threshold=0.7))
 pipeline.add_input_guardrail(PIIGuardrail(threshold=0.5))
 pipeline.add_input_guardrail(ToxicityGuardrail(threshold=0.6))
 
+# --- Output Guardrails (Inspecting Model Responses) ---
 pipeline.add_output_guardrail(DataLeakageGuardrail(threshold=0.5))
 pipeline.add_output_guardrail(PIIGuardrail(threshold=0.5))
+pipeline.add_output_guardrail(ToxicityGuardrail(threshold=0.6))
 
 class InputValidationRequest(BaseModel):
     prompt: str = Field(..., description="The user prompt to validate.")
