@@ -1,46 +1,23 @@
 """
-Security Shield engine for AI-Sentinel Guardrails.
-Ensures input is properly normalized before evaluating against generalized prompt injection patterns.
+Security shield and rule evaluation engine for AI-Sentinel.
 """
 
 import re
 from ai_sentinel.core.normalizer import InputNormalizer
 
 class SecurityShield:
-    """
-    Evaluates incoming text against prompt injection and jailbreak signatures
-    after thorough normalization.
-    """
-    
-    INJECTION_PATTERNS = [
-        re.compile(r'ignore\s+(previous|prior|all|above)\s+instructions?', re.IGNORECASE),
-        re.compile(r'disregard\s+(previous|prior|all|above)\s+(instructions?|rules?|guidelines?)', re.IGNORECASE),
-        re.compile(r'forget\s+(previous|prior|all|above)\s+(instructions?|rules?|prompt)', re.IGNORECASE),
-        re.compile(r'override\s+(previous|prior|system)\s+(instructions?|prompt|rules?)', re.IGNORECASE),
-        re.compile(r'reveal\s+(system\s+prompt|password|api\s+key|secret)', re.IGNORECASE),
-        re.compile(r'print\s+(system\s+prompt|password|api\s+key|secret)', re.IGNORECASE),
-        re.compile(r'repeat\s+(after\s+me|system\s+prompt|instructions?)', re.IGNORECASE),
+    # Generalized attack signatures targeting actions near sensitive targets
+    SIGNATURES = [
+        r"(ignore|disregard|forget|override|reveal|print|repeat)\b.*(instructions|rules|system prompt|guidelines|password|api key)",
     ]
 
-    @classmethod
-    def evaluate(cls, text: str) -> dict:
-        """
-        Normalizes text and evaluates it against known attack signatures.
-        """
-        if not isinstance(text, str):
-            text = str(text)
-
-        # Directly call full_normalize() as mandated by architecture
+    @staticmethod
+    def evaluate(text: str) -> dict:
+        # Directly call full_normalize() with no hasattr or silent except
         normalized_text = InputNormalizer.full_normalize(text)
 
-        for pattern in cls.INJECTION_PATTERNS:
-            if pattern.search(normalized_text):
-                return {
-                    "blocked": True,
-                    "reason": "Matched prompt injection signature"
-                }
+        for pattern in SecurityShield.SIGNATURES:
+            if re.search(pattern, normalized_text, re.IGNORECASE):
+                return {"blocked": True, "matched_pattern": pattern, "normalized_text": normalized_text}
 
-        return {
-            "blocked": False,
-            "reason": "Passed inspection"
-        }
+        return {"blocked": False, "matched_pattern": None, "normalized_text": normalized_text}
