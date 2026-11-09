@@ -1,68 +1,64 @@
 """
-Security shield and rule evaluation engine for AI-Sentinel with fail-closed YAML signature loading.
+Security shield core module for AI-Sentinel Guardrails.
+Dynamically loads threat signatures from a YAML configuration file and evaluates incoming prompts.
+Enforces a strict fail-closed security posture if configuration is missing or corrupted.
 """
 
-import os
-import yaml
 import re
-from ai_sentinel.core.normalizer import InputNormalizer
+import yaml
+from pathlib import Path
 
 class SecurityShield:
-    _signatures = None
+    _rules = None
 
     @classmethod
-    def _load_signatures(cls):
-        if cls._signatures is not None:
-            return cls._signatures
+    def _load_rules(cls) -> list[dict]:
+        if cls._rules is not None:
+            return cls._rules
 
-        # Locate threat_signatures.yaml relative to package structure or working directory
-        possible_paths = [
-            os.path.join(os.path.dirname(__file__), "..", "..", "threat_signatures.yaml"),
-            os.path.join(os.path.dirname(__file__), "..", "threat_signatures.yaml"),
-            "threat_signatures.yaml"
+        # Look for threat_signatures.yaml in project root or parent directories
+        config_paths = [
+            Path("threat_signatures.yaml"),
+            Path(__file__).resolve().parents[3] / "threat_signatures.yaml"
         ]
-        
-        yaml_path = None
-        for path in possible_paths:
-            abs_path = os.path.abspath(path)
-            if os.path.exists(abs_path):
-                yaml_path = abs_path
+
+        config_file = None
+        for path in config_paths:
+            if path.exists():
+                config_file = path
                 break
 
-        # Fail-closed startup validation: Refuse to start if file is missing
-        if not yaml_path:
-            raise RuntimeError("Fail-closed error: 'threat_signatures.yaml' configuration file is missing.")
+        # Fail-closed if configuration file is missing
+        if not config_file:
+            raise RuntimeError("Fail-closed security fault: threat_signatures.yaml configuration file not found.")
 
         try:
-            with open(yaml_path, "r", encoding="utf-8") as f:
+            with open(config_file, "r", encoding="utf-8") as f:
                 data = yaml.safe_load(f)
+                cls._rules = data.get("rules", [])
         except Exception as e:
-            raise RuntimeError(f"Fail-closed error: Failed to parse 'threat_signatures.yaml': {e}")
+            # Fail-closed on parsing errors
+            raise RuntimeError(f"Fail-closed security fault: Failed to parse threat_signatures.yaml: {str(e)}")
 
-        # Validate that rules exist
-        if not data or not isinstance(data, dict):
-            raise RuntimeError("Fail-closed error: 'threat_signatures.yaml' is empty or improperly formatted.")
+        return cls._rules
 
-        rules = data.get("signatures", []) or data.get("rules", [])
-        if not rules:
-            raise RuntimeError("Fail-closed error: No threat signatures or rules found in 'threat_signatures.yaml'.")
+    @classmethod
+    def evaluate(cls, prompt: str) -> dict:
+        rules = cls._load_rules()
 
-        cls._signatures = rules
-        return cls._signatures
+        for rule in rules:
+            pattern = rule.get("pattern")
+            if pattern and re.search(pattern, prompt):
+                return {
+                    "blocked": True,
+                    "matched_pattern": rule.get("name", pattern),
+                    "rule_id": rule.get("id", "UNKNOWN"),
+                    "severity": rule.get("severity", "high")
+                }
 
-    @staticmethod
-    def evaluate(text: str) -> dict:
-        # Enforce strict normalization
-        normalized_text = InputNormalizer.full_normalize(text)
-        signatures = SecurityShield._load_signatures()
-
-        for pattern in signatures:
-            try:
-                if re.search(pattern, normalized_text, re.IGNORECASE):
-                    return {"blocked": True, "matched_pattern": pattern, "normalized_text": normalized_text}
-            except re.error:
-                # Fallback for plain substring matching if pattern isn't a valid regex
-                if pattern.lower() in normalized_text.lower():
-                    return {"blocked": True, "matched_pattern": pattern, "normalized_text": normalized_text}
-
-        return {"blocked": False, "matched_pattern": None, "normalized_text": normalized_text}
+        return {
+            "blocked": False,
+            "matched_pattern": None,
+            "rule_id": None,
+            "severity": None
+        }
