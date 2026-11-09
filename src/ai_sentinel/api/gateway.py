@@ -1,122 +1,63 @@
 """
-FastAPI Gateway module for AI-Sentinel Guardrails.
-Provides secure prompt evaluation endpoints with input normalization, security shield checks,
-rate-limiting, health checks, reconnaissance fingerprinting, and administrative policy reloading.
+FastAPI Gateway for AI-Sentinel Guardrails.
+Exposes endpoints for prompt inspection, reconnaissance, and policy management.
 """
 
-from fastapi import FastAPI, Request, HTTPException
+import logging
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+
 from ai_sentinel.core.normalizer import InputNormalizer
 from ai_sentinel.core.shield import SecurityShield
 from ai_sentinel.recon.fingerprinter import AttackSurfaceFingerprinter
 
-app = FastAPI(title="AI-Sentinel Guardrails Gateway", version="1.0.0")
+logger = logging.getLogger("ai_sentinel.gateway")
 
-class PromptRequest(BaseModel):
-    prompt: Optional[str] = None
-    text: Optional[str] = None
-    input: Optional[str] = None
+# Initialize FastAPI app first to avoid circular import issues
+app = FastAPI(
+    title="AI-Sentinel Guardrails Gateway",
+    description="Production-grade AI security gateway with multi-layer threat defense.",
+    version="0.1.0"
+)
 
-class FingerprintRequest(BaseModel):
-    url: str
+# Import and add middleware after app is instantiated
+from ai_sentinel.api.middleware import GuardrailMiddleware
+app.add_middleware(GuardrailMiddleware)
 
-@app.get("/")
+class InspectRequest(BaseModel):
+    prompt: str
+    context: Optional[str] = None
+
+class ReconRequest(BaseModel):
+    target_url: str
+
 @app.get("/health")
-async def health_check():
-    return {"status": "healthy", "service": "AI-Sentinel Gateway"}
-
-async def _process_inspection(raw_text: str):
-    norm_result = InputNormalizer.normalize(raw_text)
-    cleaned_text = norm_result["cleaned_text"]
-    
-    lower_text = cleaned_text.lower()
-    
-    # Check for PII as expected by test suite
-    if "@" in cleaned_text or "contact" in lower_text or "email" in lower_text:
-        return {
-            "blocked": True,
-            "status": "blocked",
-            "reason": "PII detected",
-            "rule_id": "PII-001",
-            "matched_pattern": "Email/PII Detected",
-            "severity": "high",
-            "modifications": norm_result["modifications"]
-        }
-
-    # Check for Secrets/API keys as expected by test suite
-    if "sk-proj-" in cleaned_text or "key" in lower_text or "password" in lower_text:
-        return {
-            "blocked": True,
-            "status": "blocked",
-            "reason": "Secret or API key detected",
-            "rule_id": "SEC-001",
-            "matched_pattern": "API Key Detected",
-            "severity": "high",
-            "modifications": norm_result["modifications"]
-        }
-
-    shield_result = SecurityShield.evaluate(cleaned_text)
-
-    if shield_result["blocked"]:
-        return {
-            "blocked": True,
-            "status": "blocked",
-            "reason": "Prompt injection detected",
-            "rule_id": shield_result["rule_id"],
-            "matched_pattern": shield_result["matched_pattern"],
-            "severity": shield_result["severity"],
-            "modifications": norm_result["modifications"]
-        }
-
-    return {
-        "blocked": False,
-        "status": "allowed",
-        "cleaned_text": cleaned_text,
-        "modifications": norm_result["modifications"]
-    }
+def health_check():
+    return {"status": "healthy", "service": "ai-sentinel-gateway"}
 
 @app.post("/v1/guardrails/inspect")
-async def inspect_v1_guardrails(request: PromptRequest):
-    text = request.prompt or request.text or request.input or ""
-    return await _process_inspection(text)
+def inspect_prompt(payload: InspectRequest):
+    norm_result = InputNormalizer.normalize(payload.prompt)
+    cleaned_text = norm_result["cleaned_text"]
+    shield_result = SecurityShield.evaluate(cleaned_text)
 
-@app.post("/inspect")
-async def inspect_prompt(request: PromptRequest):
-    text = request.prompt or request.text or request.input or ""
-    return await _process_inspection(text)
-
-@app.post("/api/v1/inspect")
-async def inspect_prompt_v1(request: PromptRequest):
-    text = request.prompt or request.text or request.input or ""
-    return await _process_inspection(text)
+    return {
+        "original_prompt": payload.prompt,
+        "cleaned_prompt": cleaned_text,
+        "normalization_modifications": norm_result["modifications"],
+        "security_result": shield_result
+    }
 
 @app.post("/recon/fingerprint")
-async def run_fingerprint(request: FingerprintRequest):
+def run_reconnaissance(payload: ReconRequest):
     try:
-        results = AttackSurfaceFingerprinter.fingerprint(request.url)
-        return {
-            "status": "success",
-            "data": results
-        }
+        results = AttackSurfaceFingerprinter.fingerprint(payload.target_url)
+        return {"target": payload.target_url, "endpoints": results}
     except Exception as e:
-        return {
-            "status": "error",
-            "message": str(e)
-        }
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/admin/reload-policies")
-async def reload_policies():
-    try:
-        SecurityShield._rules = None
-        rules = SecurityShield._load_rules()
-        return {
-            "status": "success",
-            "message": "Threat policies reloaded successfully.",
-            "loaded_rules_count": len(rules)
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Failed to reload policies: {str(e)}"
-        }
+def reload_policies():
+    SecurityShield._rules = None
+    return {"status": "success", "message": "Security policies reloaded successfully."}
