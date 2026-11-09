@@ -2,6 +2,7 @@
 FastAPI gateway wrapper for AI-Sentinel Guardrails.
 Inspects incoming AI prompts through the input normalizer, security shield,
 and PII/Secret plugins, emitting structured audit logs on every evaluation.
+Includes rate-limiting and token-budgeting middleware.
 """
 
 from fastapi import FastAPI, HTTPException, status
@@ -10,11 +11,20 @@ from ai_sentinel.core.shield import SecurityShield
 from ai_sentinel.core.normalizer import InputNormalizer
 from ai_sentinel.guardrails.plugins import PIIDetectorPlugin, SecretDetectorPlugin
 from ai_sentinel.core.audit import AuditLogger
+from ai_sentinel.api.middleware import RateLimitAndBudgetMiddleware
 
 app = FastAPI(
     title="AI-Sentinel Guardrails Gateway",
-    description="Production-grade security and sanitization gateway for LLM applications.",
-    version="1.0.0"
+    description="Production-grade security, sanitization, and rate-limiting gateway for LLM applications.",
+    version="1.1.0"
+)
+
+# Add Rate Limiting and Token Budgeting Middleware
+app.add_middleware(
+    RateLimitAndBudgetMiddleware,
+    max_requests=15,
+    window_seconds=60,
+    max_tokens=3000
 )
 
 class PromptRequest(BaseModel):
