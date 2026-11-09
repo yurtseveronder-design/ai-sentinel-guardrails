@@ -1,0 +1,2 @@
+signatures:
+  - "(ignore|disregard|forget|override|reveal|print|repeat)\\b.*(instructions|rules|system prompt|guidelines|password|api key)"
