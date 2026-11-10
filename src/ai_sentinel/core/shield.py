@@ -16,8 +16,9 @@ class SecurityShield:
         self.entropy_limit = entropy_limit
         self.rules: List[Callable[[str], List[str]]] = []
         
-        # Register default built-in threat detectors
+        # Register default threat detectors and PII plugin
         self.register_rule(self._default_signature_detector)
+        self.register_rule(self._pii_detector)
 
     def register_rule(self, rule_fn: Callable[[str], List[str]]):
         """Registers a custom threat detection function or rule plugin."""
@@ -36,6 +37,18 @@ class SecurityShield:
         for sig in signatures:
             if sig.search(text):
                 matched.append(sig.pattern)
+        return matched
+
+    def _pii_detector(self, text: str) -> List[str]:
+        """Plugin rule to detect PII such as emails and phone numbers."""
+        pii_patterns = [
+            re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"), # Emails
+            re.compile(r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b")                  # Phone numbers
+        ]
+        matched = []
+        for pattern in pii_patterns:
+            if pattern.search(text):
+                matched.append(f"PII_DETECTED:{pattern.pattern}")
         return matched
 
     def inspect(self, prompt: str) -> Dict[str, Any]:
