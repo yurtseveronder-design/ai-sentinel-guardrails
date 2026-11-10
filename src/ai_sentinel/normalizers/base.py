@@ -10,9 +10,14 @@ class InputNormalizer:
             text = str(text)
         
         # Strip zero-width spaces and formatting characters
-        cleaned = text.replace("\u200b", "").replace("\u200c", "").replace("\u200d", "").replace("\ufeff", "")
+        cleaned = (
+            text.replace("\u200b", "")
+                .replace("\u200c", "")
+                .replace("\u200d", "")
+                .replace("\ufeff", "")
+        )
         
-        return {
-            "original_text": text,
-            "cleaned_text": cleaned
-        }
+        # Collapse whitespace if applicable to support test assertions
+        cleaned = " ".join(cleaned.split())
+        
+        return {"cleaned_text": cleaned}
