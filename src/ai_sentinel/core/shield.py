@@ -1,80 +1,92 @@
 """
-Security Shield module for AI-Sentinel Guardrails.
-Combines rule-based YAML threat signatures with semantic similarity detection.
+Strict phrase-matching SecurityShield engine.
+Loads threat signatures directly from config/threat_signatures.yaml, tokenizes on
+non-alphanumeric boundaries, enforces a 10-token span constraint, and respects file order.
 """
 
-import os
+from pathlib import Path
 import re
 import yaml
-from typing import Dict, Any, List
-from ai_sentinel.core.semantic_shield import SemanticShield
+
 
 class SecurityShield:
-    _rules = None
 
-    @classmethod
-    def _load_rules(cls) -> List[Dict[str, Any]]:
-        if cls._rules is not None:
-            return cls._rules
-        
-        # Try multiple relative paths to ensure rules are always found
-        possible_paths = [
-            os.path.join(os.getcwd(), "config", "threat_signatures.yaml"),
-            os.path.join(os.path.dirname(__file__), "..", "..", "config", "threat_signatures.yaml"),
-            "config/threat_signatures.yaml"
-        ]
-        
-        for rules_path in possible_paths:
-            if os.path.exists(rules_path):
-                with open(rules_path, "r", encoding="utf-8") as f:
-                    data = yaml.safe_load(f)
-                    if data and "rules" in data:
-                        cls._rules = data.get("rules", [])
-                        return cls._rules
+  def __init__(self, config_path: str = "config/threat_signatures.yaml"):
+    self.config_path = config_path
+    self.rules = self._load_rules()
 
-        cls._rules = []
-        return cls._rules
+  def _load_rules(self) -> list[dict]:
+    path = Path(self.config_path)
+    if not path.is_file():
+      raise FileNotFoundError(f"Threat signatures file missing: {self.config_path}")
 
-    @classmethod
-    def evaluate(cls, text: str) -> Dict[str, Any]:
-        """
-        Evaluates text against YAML signature rules and semantic attack clusters.
-        Always returns a standardized dictionary guaranteed to have the 'blocked' key.
-        """
-        if not text or not text.strip():
-            return {"blocked": False}
+    try:
+      with open(path, "r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    except Exception as e:
+      raise ValueError(f"Unreadable or invalid YAML file {self.config_path}: {e}")
 
-        rules = cls._load_rules()
-        lower_text = text.lower()
+    if not data or not isinstance(data, dict) or "rules" not in data:
+      raise ValueError(f"Threat signatures file is empty or malformed: {self.config_path}")
 
-        for rule in rules:
-            pattern = rule.get("pattern", "")
-            if not pattern:
-                continue
-            
-            matched = False
-            cleaned_pattern = pattern.replace("\\\\", "\\")
+    rules = data["rules"]
+    if not isinstance(rules, list) or len(rules) == 0:
+      raise ValueError(f"Threat signatures rules list is empty in: {self.config_path}")
 
-            try:
-                if re.search(cleaned_pattern, text, re.IGNORECASE) or re.search(cleaned_pattern.lower(), lower_text, re.IGNORECASE):
-                    matched = True
-            except Exception:
-                pass
+    return rules
 
-            if not matched and pattern.lower() in lower_text:
-                matched = True
+  @staticmethod
+  def _tokenize(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", text.lower())
 
-            if matched:
-                return {
-                    "blocked": True,
-                    "rule_id": rule.get("id", "SIG-001"),
-                    "matched_pattern": rule.get("name", pattern),
-                    "severity": rule.get("severity", "high")
-                }
+  def _match_rule(self, text_tokens: list[str], rule_phrase: str) -> bool:
+    rule_tokens = self._tokenize(rule_phrase)
+    if not rule_tokens:
+      return False
 
-        # Stage 2: Semantic Similarity Detection (Fail-open)
-        semantic_result = SemanticShield.evaluate(text)
-        if semantic_result.get("blocked"):
-            return semantic_result
+    k = len(rule_tokens)
+    n = len(text_tokens)
+    if k > n:
+      return False
 
-        return {"blocked": False}
+    for i in range(n - k + 1):
+      first_match_idx = -1
+      last_match_idx = -1
+      curr = i
+      matched = True
+      for rt in rule_tokens:
+        found = False
+        while curr < n:
+          if text_tokens[curr] == rt:
+            if first_match_idx == -1:
+              first_match_idx = curr
+            last_match_idx = curr
+            curr += 1
+            found = True
+            break
+          curr += 1
+        if not found:
+          matched = False
+          break
+
+      if matched:
+        span = last_match_idx - first_match_idx + 1
+        if span <= 10:
+          return True
+
+    return False
+
+  def evaluate(self, text: str) -> tuple[bool, str, str]:
+    """Evaluates input text against loaded threat signature rules.
+
+    Returns: (blocked: bool, rule_id: str, matched_phrase: str)
+    """
+    text_tokens = self._tokenize(text)
+
+    for rule in self.rules:
+      rule_id = rule.get("id", "UNKNOWN")
+      phrase = rule.get("phrase", "")
+      if self._match_rule(text_tokens, phrase):
+        return True, rule_id, phrase
+
+    return False, "", ""

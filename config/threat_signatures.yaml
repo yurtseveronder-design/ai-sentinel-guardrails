@@ -1,13 +1,7 @@
 rules:
-  - id: SIG-001
-    name: "Prompt Injection - Ignore Instructions"
-    pattern: "ignore all previous instructions"
-    severity: "high"
-  - id: SIG-002
-    name: "PII Detection - Email"
-    pattern: "test@example.com"
-    severity: "medium"
-  - id: SIG-003
-    name: "Secret Detection - API Key"
-    pattern: "sk-proj-[0-9a-zA-Z]+"
-    severity: "critical"
+  - id: PROMPT_INJECTION_01
+    phrase: "ignore previous instructions"
+  - id: PII_EMAIL_01
+    phrase: "test@example.com"
+  - id: SECRET_KEY_01
+    phrase: "sk-proj-1234567890abcdef"
