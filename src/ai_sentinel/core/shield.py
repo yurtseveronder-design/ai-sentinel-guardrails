@@ -9,16 +9,17 @@ logger = logging.getLogger("ai_sentinel.core.shield")
 class SecurityShield:
     """
     Advanced core security shield supporting asynchronous evaluation,
-    pluggable threat rules, and rich telemetry reporting.
+    pluggable threat rules, PII detection, token flood defense, and rich telemetry.
     """
     def __init__(self, strict_mode: bool = True, entropy_limit: float = 5.5):
         self.strict_mode = strict_mode
         self.entropy_limit = entropy_limit
         self.rules: List[Callable[[str], List[str]]] = []
         
-        # Register default threat detectors and PII plugin
+        # Register default threat detectors, PII plugin, and token flood defense
         self.register_rule(self._default_signature_detector)
         self.register_rule(self._pii_detector)
+        self.register_rule(self._token_flood_detector)
 
     def register_rule(self, rule_fn: Callable[[str], List[str]]):
         """Registers a custom threat detection function or rule plugin."""
@@ -42,13 +43,25 @@ class SecurityShield:
     def _pii_detector(self, text: str) -> List[str]:
         """Plugin rule to detect PII such as emails and phone numbers."""
         pii_patterns = [
-            re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"), # Emails
-            re.compile(r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b")                  # Phone numbers
+            re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),
+            re.compile(r"\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b")
         ]
         matched = []
         for pattern in pii_patterns:
             if pattern.search(text):
                 matched.append(f"PII_DETECTED:{pattern.pattern}")
+        return matched
+
+    def _token_flood_detector(self, text: str) -> List[str]:
+        """Plugin rule to detect repetitive token spam and DoS flooding attacks."""
+        matched = []
+        words = text.split()
+        if len(words) > 20:
+            # Check for excessive word repetition (e.g., repeating the same word 10+ times)
+            word_counts = {word: words.count(word) for word in set(words)}
+            max_freq = max(word_counts.values()) if word_counts else 0
+            if max_freq > (len(words) * 0.4): # If a single word makes up over 40% of the prompt
+                matched.append("TOKEN_FLOOD_REPETITION_DETECTED")
         return matched
 
     def inspect(self, prompt: str) -> Dict[str, Any]:
