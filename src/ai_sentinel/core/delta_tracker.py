@@ -1,52 +1,41 @@
 """
-Prompt Diffing / Delta Detection module for AI-Sentinel Guardrails.
-Tracks instruction-like language density across conversation turns to catch 
-gradual prompt escalation and multi-turn jailbreaks.
+PromptDeltaTracker module for AI Sentinel.
+Detects sudden semantic or lexical jumps in multi-turn conversation history.
 """
 
-import re
 from typing import List, Dict, Any
+import difflib
 
 class PromptDeltaTracker:
-    INSTRUCTION_KEYWORDS = [
-        "ignore", "override", "system", "admin", "developer", "root", 
-        "bypass", "reveal", "execute", "pretend", "act as", "roleplay"
-    ]
+    def __init__(self, threshold: float = 0.85):
+        self.threshold = threshold
 
-    @classmethod
-    def _calculate_instruction_density(cls, text: str) -> float:
-        if not text or not text.strip():
-            return 0.0
-        words = re.findall(r'\b\w+\b', text.lower())
-        if not words:
-            return 0.0
+    def evaluate(self, current_prompt: str, history: List[str]) -> Dict[str, Any]:
+        if not history:
+            return {"flagged": False, "delta_score": 0.0, "action": "ALLOW"}
+
+        # Compare current prompt against the immediate preceding turn or average of history
+        previous_prompt = history[-1]
         
-        matches = sum(1 for w in words if w in cls.INSTRUCTION_KEYWORDS)
-        return matches / len(words)
-
-    @classmethod
-    def evaluate_delta(cls, conversation_history: List[str], current_message: str, threshold: float = 0.15) -> Dict[str, Any]:
-        """
-        Compares instruction density of the current message against the average of previous messages.
-        Flags sudden spikes in instruction-like or role-playing language.
-        """
-        if not conversation_history:
-            return {"blocked": False, "delta": 0.0}
-
-        current_density = cls._calculate_instruction_density(current_message)
+        # Calculate sequence similarity ratio
+        matcher = difflib.SequenceMatcher(None, previous_prompt, current_prompt)
+        similarity = matcher.ratio()
         
-        previous_densities = [cls._calculate_instruction_density(msg) for msg in conversation_history]
-        avg_previous_density = sum(previous_densities) / len(previous_densities) if previous_densities else 0.0
+        # If similarity drops dramatically while prompt length spikes or shifts entirely, flag sudden injection/pivot
+        # Here we track delta score as (1.0 - similarity)
+        delta_score = round(1.0 - similarity, 4)
 
-        delta = current_density - avg_previous_density
-
-        if delta >= threshold or (current_density > 0.30 and avg_previous_density < 0.05):
+        # Example heuristic: if delta score exceeds threshold (indicating sudden abrupt shift in context/intent)
+        if delta_score > self.threshold and len(current_prompt) > 30:
             return {
-                "blocked": True,
-                "rule_id": "DELTA-001",
-                "matched_pattern": f"Sudden instruction density spike (Delta: {delta:.2f})",
-                "severity": "high",
-                "delta": delta
+                "flagged": True,
+                "action": "BLOCK",
+                "matched_rules": ["multi_turn_prompt_delta_spike"],
+                "delta_score": delta_score
             }
 
-        return {"blocked": False, "delta": delta}
+        return {
+            "flagged": False,
+            "action": "ALLOW",
+            "delta_score": delta_score
+        }

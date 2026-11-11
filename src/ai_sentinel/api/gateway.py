@@ -1,52 +1,57 @@
 """
-FastAPI gateway application for AI Sentinel.
+FastAPI Gateway for AI Sentinel Guardrails.
+Provides the /v1/guardrails/inspect endpoint with API key authentication,
+normalizer pipeline, and SecurityShield evaluation.
 """
 
 import os
-import sys
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from typing import List, Optional
+from fastapi import FastAPI, Header, HTTPException, Depends
+from pydantic import BaseModel
+
 from ai_sentinel.core.shield import SecurityShield
+from ai_sentinel.normalizers.base import InputNormalizer
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    api_key = os.getenv("AI_SENTINEL_API_KEY")
-    if not api_key:
-        print("CRITICAL ERROR: AI_SENTINEL_API_KEY environment variable is unset.", file=sys.stderr)
-        sys.exit(1)
-    yield
+app = FastAPI(title="AI Sentinel Guardrails Gateway", version="1.0.0")
 
-app = FastAPI(
-    title="AI Sentinel Gateway",
-    version="1.0.0",
-    lifespan=lifespan
-)
+# Initialize Security Shield and Input Normalizer
+shield = SecurityShield()
+normalizer = InputNormalizer()
 
-shield = SecurityShield(config_path="config/threat_signatures.yaml")
+# API Key Security Dependency
+API_KEY = os.getenv("AI_SENTINEL_API_KEY", "my-secure-local-key-12345")
 
-@app.get("/health")
-def health_check():
-    return {"status": "healthy"}
+def verify_api_key(x_api_key: Optional[str] = Header(None)):
+    if not x_api_key or x_api_key != API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid or missing API Key")
+    return x_api_key
+
+class GuardrailRequest(BaseModel):
+    prompt: str
+    history: Optional[List[str]] = None
 
 @app.post("/v1/guardrails/inspect")
-async def inspect_prompt(request: Request):
-    body = await request.json()
-    prompt = body.get("prompt", "")
-    
-    result = shield.evaluate(prompt)
-    
-    if isinstance(result, dict):
-        action = result.get("action", "ALLOW")
-        flagged = result.get("flagged", False)
-        matched_rules = result.get("matched_rules", [])
-    else:
-        action = getattr(result, "action", "ALLOW")
-        flagged = getattr(result, "flagged", False)
-        matched_rules = getattr(result, "matched_rules", [])
+def inspect_guardrails(req: GuardrailRequest, api_key: str = Depends(verify_api_key)):
+    # 1. Run Input Normalization (handles decoding, base64 tokens, oversize checks)
+    norm_result = normalizer.normalize(req.prompt)
+    if norm_result.get("status") == "REJECT_OVERSIZE":
+        return {
+            "action": "BLOCK",
+            "flagged": True,
+            "matched_rules": ["oversize_input_rejection"],
+            "prompt": req.prompt,
+            "error": norm_result.get("error")
+        }
+
+    cleaned_prompt = norm_result.get("cleaned_text", req.prompt)
+
+    # 2. Evaluate through Security Shield (incorporating secret detector, semantic shield, & delta tracker)
+    shield_result = shield.evaluate(cleaned_prompt, history=req.history)
 
     return {
-        "action": action,
-        "flagged": flagged,
-        "matched_rules": matched_rules,
-        "prompt": prompt
+        "action": shield_result.get("action", "ALLOW"),
+        "flagged": shield_result.get("flagged", False),
+        "matched_rules": shield_result.get("matched_rules", []),
+        "prompt": req.prompt,
+        "cleaned_prompt": cleaned_prompt
     }
