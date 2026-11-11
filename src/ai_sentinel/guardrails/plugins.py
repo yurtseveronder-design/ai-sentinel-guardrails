@@ -1,32 +1,13 @@
 """
-Concrete Guardrail implementations for AI Sentinel.
+Concrete Guardrail plugins inheriting from BaseGuardrail with validate methods.
 """
 
 from ai_sentinel.guardrails.base import BaseGuardrail, GuardrailResult
 
-class PromptInjectionGuardrail(BaseGuardrail):
-    def evaluate(self, text: str) -> GuardrailResult:
-        lower = text.lower()
-        flagged = "ignore previous instructions" in lower or "system prompt override" in lower
-        return GuardrailResult(
-            action="BLOCK" if flagged else "ALLOW",
-            flagged=flagged,
-            matched_rules=["prompt_injection"] if flagged else [],
-            sanitized_text=text
-        )
+class PIIDetectorPlugin(BaseGuardrail):
+    def validate(self, text: str) -> GuardrailResult:
+        return self.evaluate(text)
 
-class DataLeakageGuardrail(BaseGuardrail):
-    def evaluate(self, text: str) -> GuardrailResult:
-        lower = text.lower()
-        flagged = "sk-proj-" in text or "api_key" in lower
-        return GuardrailResult(
-            action="BLOCK" if flagged else "ALLOW",
-            flagged=flagged,
-            matched_rules=["data_leakage_secret"] if flagged else [],
-            sanitized_text=text
-        )
-
-class PIIGuardrail(BaseGuardrail):
     def evaluate(self, text: str) -> GuardrailResult:
         lower = text.lower()
         flagged = "@" in text and "." in text and "test@example.com" in lower
@@ -37,7 +18,38 @@ class PIIGuardrail(BaseGuardrail):
             sanitized_text=text
         )
 
+class SecretDetectorPlugin(BaseGuardrail):
+    def validate(self, text: str) -> GuardrailResult:
+        return self.evaluate(text)
+
+    def evaluate(self, text: str) -> GuardrailResult:
+        lower = text.lower()
+        flagged = "sk-proj-" in text or "api_key" in lower
+        return GuardrailResult(
+            action="BLOCK" if flagged else "ALLOW",
+            flagged=flagged,
+            matched_rules=["data_leakage_secret"] if flagged else [],
+            sanitized_text=text
+        )
+
+class PromptInjectionGuardrail(BaseGuardrail):
+    def validate(self, text: str) -> GuardrailResult:
+        return self.evaluate(text)
+
+    def evaluate(self, text: str) -> GuardrailResult:
+        lower = text.lower()
+        flagged = "ignore previous instructions" in lower or "system prompt override" in lower
+        return GuardrailResult(
+            action="BLOCK" if flagged else "ALLOW",
+            flagged=flagged,
+            matched_rules=["prompt_injection"] if flagged else [],
+            sanitized_text=text
+        )
+
 class ToxicityGuardrail(BaseGuardrail):
+    def validate(self, text: str) -> GuardrailResult:
+        return self.evaluate(text)
+
     def evaluate(self, text: str) -> GuardrailResult:
         lower = text.lower()
         flagged = "toxic" in lower or "hate" in lower
@@ -47,3 +59,15 @@ class ToxicityGuardrail(BaseGuardrail):
             matched_rules=["toxicity_filter"] if flagged else [],
             sanitized_text=text
         )
+
+# Pipeline input and output registrations
+INPUT_GUARDRAILS = [
+    PromptInjectionGuardrail(),
+    PIIDetectorPlugin(),
+    SecretDetectorPlugin()
+]
+
+OUTPUT_GUARDRAILS = [
+    ToxicityGuardrail(),
+    PIIDetectorPlugin()
+]
