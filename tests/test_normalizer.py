@@ -6,24 +6,28 @@ from ai_sentinel.normalizers.base import InputNormalizer
 
 def test_zero_width_stripping():
     payload = "Hello\u200bWorld"
-    res = InputNormalizer.normalize(payload)
+    normalizer = InputNormalizer()
+    res = normalizer.normalize(payload)
     cleaned = res["cleaned_text"] if isinstance(res, dict) else res
     assert "Hello" in cleaned and "World" in cleaned
 
 def test_homoglyph_normalization():
     payload = "Hello"
-    res = InputNormalizer.normalize(payload)
+    normalizer = InputNormalizer()
+    res = normalizer.normalize(payload)
     cleaned = res["cleaned_text"] if isinstance(res, dict) else res
     assert isinstance(cleaned, str)
 
 def test_html_and_url_decoding():
     payload = "Hello%20World"
-    res = InputNormalizer.normalize(payload)
+    normalizer = InputNormalizer()
+    res = normalizer.normalize(payload)
     cleaned = res["cleaned_text"] if isinstance(res, dict) else res
     assert isinstance(cleaned, str)
 
 def test_whitespace_collapse():
     payload = "   hello   world   \n\t "
-    res = InputNormalizer.normalize(payload)
+    normalizer = InputNormalizer()
+    res = normalizer.normalize(payload)
     cleaned = res["cleaned_text"] if isinstance(res, dict) else res
     assert cleaned == "hello world"
