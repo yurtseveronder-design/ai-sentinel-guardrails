@@ -1,7 +1,7 @@
 """
 FastAPI Gateway for AI Sentinel Guardrails.
 Provides the /v1/guardrails/inspect endpoint with API key authentication,
-normalizer pipeline, and SecurityShield evaluation.
+normalizer pipeline, SecurityShield evaluation, and telemetry middleware.
 """
 
 import os
@@ -11,8 +11,12 @@ from pydantic import BaseModel
 
 from ai_sentinel.core.shield import SecurityShield
 from ai_sentinel.normalizers.base import InputNormalizer
+from ai_sentinel.middleware.telemetry import TelemetryAndRateLimitMiddleware
 
 app = FastAPI(title="AI Sentinel Guardrails Gateway", version="1.0.0")
+
+# Attach Telemetry and Rate Limit Middleware
+app.add_middleware(TelemetryAndRateLimitMiddleware, max_requests=10, window_seconds=60)
 
 # Initialize Security Shield and Input Normalizer
 shield = SecurityShield()
@@ -32,7 +36,6 @@ class GuardrailRequest(BaseModel):
 
 @app.post("/v1/guardrails/inspect")
 def inspect_guardrails(req: GuardrailRequest, api_key: str = Depends(verify_api_key)):
-    # 1. Run Input Normalization (handles decoding, base64 tokens, oversize checks)
     norm_result = normalizer.normalize(req.prompt)
     if norm_result.get("status") == "REJECT_OVERSIZE":
         return {
@@ -44,8 +47,6 @@ def inspect_guardrails(req: GuardrailRequest, api_key: str = Depends(verify_api_
         }
 
     cleaned_prompt = norm_result.get("cleaned_text", req.prompt)
-
-    # 2. Evaluate through Security Shield (incorporating secret detector, semantic shield, & delta tracker)
     shield_result = shield.evaluate(cleaned_prompt, history=req.history)
 
     return {
