@@ -26,8 +26,12 @@ class SecretDetectorPlugin:
         matched_rules = []
         for rule in self.rules:
             pattern = rule.get("pattern", "")
-            if pattern and re.search(pattern, text):
-                matched_rules.append(rule.get("id", "unknown_rule"))
+            if isinstance(pattern, (list, tuple)):
+                pattern = "".join(str(p) for p in pattern)
+            
+            if pattern and isinstance(pattern, str):
+                if re.search(pattern, text, re.IGNORECASE):
+                    matched_rules.append(rule.get("id", "unknown_rule"))
 
         if matched_rules:
             return {

@@ -8,5 +8,5 @@ rules:
     description: "Detects email addresses (PII)"
 
   - id: "prompt_injection_override"
-    pattern: "(?i)(ignore previous instructions|system prompt override)"
+    pattern: "(?i)(ignore previous instructions|system\\s*prompt\\s*override)"
     description: "Detects common prompt injection and instruction override attempts"
