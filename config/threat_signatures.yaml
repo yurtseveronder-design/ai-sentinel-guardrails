@@ -1,16 +1,12 @@
 rules:
-  - id: prompt_injection_ignore
-    phrase: "ignore previous instructions"
-    description: "Detects prompt injection attempts to ignore previous guidelines."
-  
-  - id: prompt_override
-    phrase: "system prompt override"
-    description: "Detects attempts to override system configurations."
+  - id: "api_key_secret_leak"
+    pattern: "sk-[a-zA-Z0-9_-]{15,}"
+    description: "Detects OpenAI and generic secret API keys"
 
-  - id: pii_email
-    phrase: "test@example.com"
-    description: "Detects standard test PII emails."
+  - id: "email_pii_leak"
+    pattern: "[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+"
+    description: "Detects email addresses (PII)"
 
-  - id: api_secret
-    phrase: "sk-proj-"
-    description: "Detects exposed OpenAI secret API keys."
+  - id: "prompt_injection_override"
+    pattern: "(?i)(ignore previous instructions|system prompt override)"
+    description: "Detects common prompt injection and instruction override attempts"
