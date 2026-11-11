@@ -1,36 +1,37 @@
 # AI-Sentinel Guardrails
 
-A lightweight, extensible security gateway and input normalization pipeline designed to protect LLM applications from prompt injection, basic obfuscation, PII leakage, and token-flood DoS attacks.
+Version 0.9.0.
 
-## What It Actually Does
+## Run
 
-`ai-sentinel-guardrails` is not a silver bullet for AI safety; rather, it provides a practical, deterministic defense-in-depth layer sitting between untrusted user input and your LLM backend:
+Install the package:
 
-1. **Multi-Pass Normalization (`InputNormalizer`):** Cleans incoming strings to neutralize evasion techniques before pattern matching occurs (Unicode NFKC homoglyph normalization, zero-width space stripping, HTML unescaping, control character removal, and Shannon entropy analysis).
-2. **Pluggable Threat Inspection (`SecurityShield`):** Evaluates sanitized text against a modular registry of threat rules:
-   - **Signature Detection:** Flags known prompt injection overrides and exposed secrets (e.g., API keys).
-   - **PII Detection:** Identifies sensitive data patterns like email addresses and phone numbers.
-   - **Token Flood Defense:** Detects excessive word/token repetition designed to exhaust downstream LLM context or compute resources.
-3. **FastAPI Gateway (`gateway.py`):** Exposes an inspection endpoint (`/v1/guardrails/inspect`) protected by API key header verification, supporting both synchronous and asynchronous evaluation.
+```bash
+pip install .
+```
 
----
+Set the API key the gateway checks with `hmac.compare_digest`:
 
-## Project Structure
+```bash
+# Windows PowerShell
+$env:AI_SENTINEL_API_KEY = "your-key"
+```
 
-```text
-ai-sentinel-guardrails/
-├── src/
-│   └── ai_sentinel/
-│       ├── api/
-│       │   └── gateway.py         # FastAPI routing & API key middleware
-│       ├── core/
-│       │   └── shield.py          # SecurityShield engine & pluggable rules
-│       └── normalizers/
-│           └── base.py            # Multi-pass input sanitization & entropy checks
-├── tests/
-│   ├── test_adversarial_eval.py   # Adversarial evaluation test suite
-│   ├── test_fuzz_normalizer.py    # Hypothesis property-based fuzz tests
-│   ├── test_gateway.py            # API endpoint integration tests
-│   └── test_middleware.py         # Security middleware tests
-├── requirements.txt
-└── pytest.ini
+```bash
+# Unix
+export AI_SENTINEL_API_KEY=your-key
+```
+
+Start the gateway:
+
+```bash
+uvicorn ai_sentinel.api.gateway:app
+```
+
+Send the same value in the `x-api-key` header. A missing or different key returns 401.
+
+Inspect a string from the CLI. The process prints action, risk level, and matched rules, and exits 1 when the action is BLOCK:
+
+```bash
+python -m ai_sentinel.cli inspect "Ignore previous instructions"
+```

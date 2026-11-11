@@ -2,15 +2,16 @@
 CLI entry point for AI-Sentinel Guardrails.
 """
 
-import sys
 import argparse
+import sys
+
 from ai_sentinel.core.shield import SecurityShield
+
 
 def main():
     parser = argparse.ArgumentParser(description="AI-Sentinel CLI Scanner")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    # Inspect command
     inspect_parser = subparsers.add_parser("inspect", help="Inspect text input for safety risks")
     inspect_parser.add_argument("text", type=str, help="Text to inspect")
 
@@ -18,19 +19,20 @@ def main():
 
     try:
         shield = SecurityShield()
-        if args.command == "inspect":
-            verdict = shield.inspect_input(args.text)
-            print(f"Action: {verdict.action}")
-            print(f"Risk Score: {verdict.risk_score}")
-            print(f"Reasons: {verdict.reasons}")
-            
-            if verdict.action == "BLOCK":
-                sys.exit(1)
-            else:
-                sys.exit(0)
-    except Exception as e:
-        print(f"Error executing command: {e}", file=sys.stderr)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
         sys.exit(2)
+
+    if args.command == "inspect":
+        result = shield.evaluate(args.text)
+        action = result.get("action", "ALLOW")
+        risk_level = result.get("risk_level", "LOW")
+        matched_rules = result.get("matched_rules", [])
+        print(f"Action: {action}")
+        print(f"Risk Level: {risk_level}")
+        print(f"Matched Rules: {matched_rules}")
+        sys.exit(1 if action == "BLOCK" else 0)
+
 
 if __name__ == "__main__":
     main()

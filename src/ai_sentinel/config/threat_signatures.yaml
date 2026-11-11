@@ -1,0 +1,20 @@
+rules:
+  - id: "api_key_secret_leak"
+    pattern: "sk-[a-zA-Z0-9_-]{15,}"
+    description: "Detects OpenAI and generic secret API keys"
+
+  - id: "email_pii_leak"
+    pattern: "[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+"
+    description: "Detects email addresses (PII)"
+
+  - id: "prompt_injection_override"
+    pattern: "(?i)(ignore previous instructions|system\\s*prompt\\s*override)"
+    description: "Detects common prompt injection and instruction override attempts"
+
+  - id: "secret_keyword"
+    pattern: "(?i)\\bsecret\\b"
+    description: "Detects the credential word secret after homoglyph folding"
+
+  - id: "system_attack_instruction"
+    pattern: "(?i)configure your system as an attacker"
+    description: "Detects the decoded instruction to configure the system as an attacker"

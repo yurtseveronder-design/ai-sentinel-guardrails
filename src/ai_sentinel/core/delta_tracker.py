@@ -1,41 +1,69 @@
 """
 PromptDeltaTracker module for AI Sentinel.
-Detects sudden semantic or lexical jumps in multi-turn conversation history.
+
+Flags a spike in instruction-like word density against earlier turns.
 """
 
-from typing import List, Dict, Any
-import difflib
+import re
+from typing import Any, Dict, List
+
 
 class PromptDeltaTracker:
-    def __init__(self, threshold: float = 0.85):
+    INSTRUCTION_KEYWORDS = frozenset({
+        "ignore",
+        "override",
+        "system",
+        "admin",
+        "developer",
+        "root",
+        "bypass",
+        "reveal",
+        "execute",
+        "pretend",
+        "roleplay",
+        "instructions",
+    })
+
+    def __init__(self, threshold: float = 0.15):
         self.threshold = threshold
+
+    def _instruction_density(self, text: str) -> float:
+        if not text or not text.strip():
+            return 0.0
+        words = re.findall(r"\b\w+\b", text.lower())
+        if not words:
+            return 0.0
+        hits = sum(1 for word in words if word in self.INSTRUCTION_KEYWORDS)
+        return hits / len(words)
 
     def evaluate(self, current_prompt: str, history: List[str]) -> Dict[str, Any]:
         if not history:
-            return {"flagged": False, "delta_score": 0.0, "action": "ALLOW"}
+            return {
+                "flagged": False,
+                "action": "ALLOW",
+                "matched_rules": [],
+                "delta": 0.0,
+            }
 
-        # Compare current prompt against the immediate preceding turn or average of history
-        previous_prompt = history[-1]
-        
-        # Calculate sequence similarity ratio
-        matcher = difflib.SequenceMatcher(None, previous_prompt, current_prompt)
-        similarity = matcher.ratio()
-        
-        # If similarity drops dramatically while prompt length spikes or shifts entirely, flag sudden injection/pivot
-        # Here we track delta score as (1.0 - similarity)
-        delta_score = round(1.0 - similarity, 4)
+        current_density = self._instruction_density(current_prompt)
+        previous = [self._instruction_density(turn) for turn in history]
+        average_previous = sum(previous) / len(previous)
+        delta = current_density - average_previous
 
-        # Example heuristic: if delta score exceeds threshold (indicating sudden abrupt shift in context/intent)
-        if delta_score > self.threshold and len(current_prompt) > 30:
+        spiked = delta >= self.threshold or (
+            current_density > 0.30 and average_previous < 0.05
+        )
+        if spiked:
             return {
                 "flagged": True,
                 "action": "BLOCK",
-                "matched_rules": ["multi_turn_prompt_delta_spike"],
-                "delta_score": delta_score
+                "matched_rules": ["instruction_density_spike"],
+                "delta": round(delta, 4),
             }
 
         return {
             "flagged": False,
             "action": "ALLOW",
-            "delta_score": delta_score
+            "matched_rules": [],
+            "delta": round(delta, 4),
         }

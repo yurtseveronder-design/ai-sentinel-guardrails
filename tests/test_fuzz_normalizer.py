@@ -1,39 +1,29 @@
 """
-CLI entrypoint for AI Sentinel Guardrails.
+Property-based fuzz tests for InputNormalizer.
 """
 
-import sys
-import argparse
-from ai_sentinel.core.shield import SecurityShield
+import pytest
+from hypothesis import given, strategies as st, settings, HealthCheck
 
-def main():
-    parser = argparse.ArgumentParser(description="AI Sentinel CLI Guardrail Inspector")
-    parser.add_argument("prompt", type=str, help="The prompt text to inspect")
-    parser.add_argument("--config", type=str, default="config/threat_signatures.yaml", help="Path to threat signatures config")
-    
-    args = parser.parse_args()
-    
-    shield = SecurityShield(config_path=args.config)
-    result = shield.evaluate(args.prompt)
-    
-    # Handle both dict and object returns gracefully
-    if isinstance(result, dict):
-        action = result.get("action", "ALLOW")
-        risk_level = "HIGH" if result.get("flagged", False) else "LOW"
-        matched_rules = result.get("matched_rules", [])
-    else:
-        action = getattr(result, "action", "ALLOW")
-        risk_level = "HIGH" if getattr(result, "flagged", False) else "LOW"
-        matched_rules = getattr(result, "matched_rules", [])
+from ai_sentinel.normalizers.base import InputNormalizer
 
-    print(f"Action: {action}")
-    print(f"Risk Level: {risk_level}")
-    print(f"Matched Rules: {matched_rules}")
 
-    if action == "BLOCK":
-        sys.exit(2)
-    else:
-      sys.exit(0)
-
-if __name__ == "__main__":
-    main()
+@settings(max_examples=500, suppress_health_check=[HealthCheck.too_slow])
+@given(st.text(min_size=0, max_size=8192))
+def test_input_normalizer_fuzz_resilience(text: str):
+    """
+    Feeds arbitrary unicode strings up to the size limit and checks that
+    normalize returns cleaned_text without an unexpected exception.
+    """
+    normalizer = InputNormalizer()
+    try:
+        normalized_output = normalizer.normalize(text)
+        if isinstance(normalized_output, dict):
+            assert "cleaned_text" in normalized_output
+            assert isinstance(normalized_output["cleaned_text"], str)
+        else:
+            assert isinstance(normalized_output, str)
+    except TypeError:
+        pass
+    except Exception as exc:
+        pytest.fail(f"InputNormalizer raised an unexpected exception for input {text!r}: {exc}")

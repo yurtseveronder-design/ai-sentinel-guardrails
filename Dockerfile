@@ -1,45 +1,19 @@
-"""
-Secret detector plugin for AI Sentinel.
-"""
+FROM python:3.12-slim
 
-import os
-import yaml
-from ai_sentinel.core.base import BaseGuardrail
+WORKDIR /app
 
-class SecretDetectorPlugin(BaseGuardrail):
-    def __init__(self, config_path="config/threat_signatures.yaml"):
-        self.patterns = []
-        self._load_config(config_path)
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-    def _load_config(self, config_path):
-        if os.path.exists(config_path):
-            with open(config_path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-                # Extract regex patterns from config, storing patterns and not sample strings
-                for rule in data.get("secrets", []):
-                    if "pattern" in rule:
-                        self.patterns.append(rule["pattern"])
-        
-        # Fallback if config is missing or lacks secrets
-        if not self.patterns:
-            self.patterns.append(r"sk-[A-Za-z0-9-]{20,}")
+COPY pyproject.toml README.md LICENSE.txt ./
+COPY src ./src
 
-    def validate(self, text: str) -> dict:
-        import re
-        matched_rules = []
-        for pattern in self.patterns:
-            if re.search(pattern, text):
-                matched_rules.append(pattern)
+RUN pip install --no-cache-dir . \
+    && useradd --create-home --shell /usr/sbin/nologin sentinel
 
-        if matched_rules:
-            return {
-                "action": "BLOCK",
-                "flagged": True,
-                "matched_rules": matched_rules
-            }
-        
-        return {
-            "action": "ALLOW",
-            "flagged": False,
-            "matched_rules": []
-        }
+USER sentinel
+
+EXPOSE 8000
+
+# Pass AI_SENTINEL_API_KEY at runtime. The image does not contain a key.
+CMD ["uvicorn", "ai_sentinel.api.gateway:app", "--host", "0.0.0.0", "--port", "8000"]

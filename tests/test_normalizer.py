@@ -12,18 +12,18 @@ def test_zero_width_stripping():
     assert "Hello" in cleaned and "World" in cleaned
 
 def test_homoglyph_normalization():
-    payload = "Hello"
+    payload = "S\u0435cret"
     normalizer = InputNormalizer()
     res = normalizer.normalize(payload)
     cleaned = res["cleaned_text"] if isinstance(res, dict) else res
-    assert isinstance(cleaned, str)
+    assert cleaned == "Secret"
 
 def test_html_and_url_decoding():
     payload = "Hello%20World"
     normalizer = InputNormalizer()
     res = normalizer.normalize(payload)
     cleaned = res["cleaned_text"] if isinstance(res, dict) else res
-    assert isinstance(cleaned, str)
+    assert cleaned == "Hello World"
 
 def test_whitespace_collapse():
     payload = "   hello   world   \n\t "
