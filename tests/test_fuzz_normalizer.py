@@ -1,53 +1,39 @@
 """
-FastAPI Gateway for AI Sentinel Guardrails.
-Provides inspection endpoints with API key security and shield evaluation.
+CLI entrypoint for AI Sentinel Guardrails.
 """
 
-import os
-from fastapi import FastAPI, Header, HTTPException, Depends
-from pydantic import BaseModel
+import sys
+import argparse
 from ai_sentinel.core.shield import SecurityShield
 
-app = FastAPI(title="AI Sentinel Gateway", version="1.0.0")
-
-# Initialize shield
-shield = SecurityShield()
-
-# Security API key check
-API_KEY = os.getenv("AI_SENTINEL_API_KEY", "my-secure-local-key-12345")
-
-def verify_api_key(x_api_key: str = Header(None)):
-    if not x_api_key or x_api_key != API_KEY:
-        raise HTTPException(status_code=401, detail="Unauthorized: Invalid or missing API Key")
-    return x_api_key
-
-class InspectRequest(BaseModel):
-    prompt: str
-
-@app.get("/health")
-def health_check():
-    return {"status": "healthy"}
-
-@app.post("/v1/guardrails/inspect")
-def inspect_prompt(payload: InspectRequest, api_key: str = Depends(verify_api_key)):
-    # Evaluate prompt against the security shield
-    evaluation_result = shield.evaluate(payload.prompt)
+def main():
+    parser = argparse.ArgumentParser(description="AI Sentinel CLI Guardrail Inspector")
+    parser.add_argument("prompt", type=str, help="The prompt text to inspect")
+    parser.add_argument("--config", type=str, default="config/threat_signatures.yaml", help="Path to threat signatures config")
     
-    # Handle dictionary-based evaluation results robustly
-    if isinstance(evaluation_result, dict):
-        action = evaluation_result.get("action", "ALLOW")
-        flagged = evaluation_result.get("flagged", False)
-        matched_rules = evaluation_result.get("matched_rules", [])
+    args = parser.parse_args()
+    
+    shield = SecurityShield(config_path=args.config)
+    result = shield.evaluate(args.prompt)
+    
+    # Handle both dict and object returns gracefully
+    if isinstance(result, dict):
+        action = result.get("action", "ALLOW")
+        risk_level = "HIGH" if result.get("flagged", False) else "LOW"
+        matched_rules = result.get("matched_rules", [])
     else:
-        # Fallback if tuple is returned (blocked, rule_id, phrase)
-        blocked, rule_id, phrase = evaluation_result
-        flagged = blocked
-        action = "BLOCK" if flagged else "ALLOW"
-        matched_rules = [rule_id] if rule_id else []
+        action = getattr(result, "action", "ALLOW")
+        risk_level = "HIGH" if getattr(result, "flagged", False) else "LOW"
+        matched_rules = getattr(result, "matched_rules", [])
 
-    return {
-        "action": action,
-        "flagged": flagged,
-        "matched_rules": matched_rules,
-        "prompt": payload.prompt
-    }
+    print(f"Action: {action}")
+    print(f"Risk Level: {risk_level}")
+    print(f"Matched Rules: {matched_rules}")
+
+    if action == "BLOCK":
+        sys.exit(2)
+    else:
+      sys.exit(0)
+
+if __name__ == "__main__":
+    main()
