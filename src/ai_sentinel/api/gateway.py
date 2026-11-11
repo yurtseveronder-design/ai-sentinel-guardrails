@@ -1,58 +1,54 @@
 """
-FastAPI Gateway for AI Sentinel Guardrails.
-Provides the /v1/guardrails/inspect endpoint with API key authentication,
-normalizer pipeline, SecurityShield evaluation, and telemetry middleware.
+FastAPI Security Gateway for AI Sentinel Guardrails.
+Provides inspection and guardrail validation endpoints.
 """
 
-import os
-from typing import List, Optional
-from fastapi import FastAPI, Header, HTTPException, Depends
+from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel
-
 from ai_sentinel.core.shield import SecurityShield
-from ai_sentinel.normalizers.base import InputNormalizer
-from ai_sentinel.middleware.telemetry import TelemetryAndRateLimitMiddleware
+import time
 
-app = FastAPI(title="AI Sentinel Guardrails Gateway", version="1.0.0")
-
-# Attach Telemetry and Rate Limit Middleware
-app.add_middleware(TelemetryAndRateLimitMiddleware, max_requests=10, window_seconds=60)
-
-# Initialize Security Shield and Input Normalizer
+app = FastAPI(title="AI Sentinel Gateway", version="1.0.0")
 shield = SecurityShield()
-normalizer = InputNormalizer()
 
-# API Key Security Dependency
-API_KEY = os.getenv("AI_SENTINEL_API_KEY", "my-secure-local-key-12345")
-
-def verify_api_key(x_api_key: Optional[str] = Header(None)):
-    if not x_api_key or x_api_key != API_KEY:
-        raise HTTPException(status_code=403, detail="Invalid or missing API Key")
-    return x_api_key
-
-class GuardrailRequest(BaseModel):
+class InspectRequest(BaseModel):
     prompt: str
-    history: Optional[List[str]] = None
+
+@app.middleware("http")
+async def add_process_time_header(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    response.headers["X-Process-Time"] = str(process_time)
+    return response
 
 @app.post("/v1/guardrails/inspect")
-def inspect_guardrails(req: GuardrailRequest, api_key: str = Depends(verify_api_key)):
-    norm_result = normalizer.normalize(req.prompt)
-    if norm_result.get("status") == "REJECT_OVERSIZE":
-        return {
-            "action": "BLOCK",
-            "flagged": True,
-            "matched_rules": ["oversize_input_rejection"],
-            "prompt": req.prompt,
-            "error": norm_result.get("error")
-        }
-
-    cleaned_prompt = norm_result.get("cleaned_text", req.prompt)
-    shield_result = shield.evaluate(cleaned_prompt, history=req.history)
-
+def guardrail_inspect(payload: InspectRequest, x_api_key: str = Header(None)):
+    result = shield.evaluate(payload.prompt)
     return {
-        "action": shield_result.get("action", "ALLOW"),
-        "flagged": shield_result.get("flagged", False),
-        "matched_rules": shield_result.get("matched_rules", []),
-        "prompt": req.prompt,
-        "cleaned_prompt": cleaned_prompt
+        "action": result.get("action", "ALLOW"),
+        "flagged": result.get("flagged", False),
+        "matched_rules": result.get("matched_rules", [])
     }
+
+@app.post("/v1/guardrails/input")
+def guardrail_input(payload: InspectRequest):
+    result = shield.evaluate(payload.prompt)
+    return {
+        "action": result.get("action", "ALLOW"),
+        "flagged": result.get("flagged", False),
+        "matched_rules": result.get("matched_rules", [])
+    }
+
+@app.post("/v1/guardrails/output")
+def guardrail_output(payload: InspectRequest):
+    result = shield.evaluate(payload.prompt)
+    return {
+        "action": result.get("action", "ALLOW"),
+        "flagged": result.get("flagged", False),
+        "matched_rules": result.get("matched_rules", [])
+    }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8000)
