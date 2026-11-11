@@ -1,39 +1,52 @@
 """
-SecurityShield implementation.
+Core SecurityShield coordinator for AI Sentinel.
+Manages plugins and optional semantic shield evaluation with fail-open behavior.
 """
 
 import os
 import yaml
-from ai_sentinel.guardrails.base import BaseGuardrail, GuardrailResult
+from ai_sentinel.plugins.secret_detector import SecretDetectorPlugin
 
-class SecurityShield(BaseGuardrail):
+# Optional sklearn / SemanticShield import with fail-open safety
+SKLEARN_AVAILABLE = False
+try:
+    import sklearn
+    from ai_sentinel.shields.semantic_shield import SemanticShield
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SemanticShield = None
+
+class SecurityShield:
     def __init__(self, config_path="config/threat_signatures.yaml"):
-        self.rules = []
-        if os.path.exists(config_path):
-            with open(config_path, "r", encoding="utf-8") as f:
-                data = yaml.safe_load(f)
-                if data and "rules" in data:
-                    self.rules = data["rules"]
-
-    def evaluate(self, text: str) -> GuardrailResult:
-        if not isinstance(text, str):
-            text = str(text)
-
-        lower_text = text.lower()
-        matched_rules = []
+        self.config_path = config_path
+        self.secret_detector = SecretDetectorPlugin(config_path)
         
-        for rule in self.rules:
-            phrase = rule.get("phrase", "")
-            rule_id = rule.get("id", "unknown_rule")
-            if phrase and phrase.lower() in lower_text:
-                matched_rules.append(rule_id)
+        # Initialize semantic shield conditionally if sklearn is available
+        self.semantic_shield = None
+        if SKLEARN_AVAILABLE:
+            try:
+                self.semantic_shield = SemanticShield()
+            except Exception:
+                self.semantic_shield = None
 
-        flagged = len(matched_rules) > 0
-        action = "BLOCK" if flagged else "ALLOW"
+    def evaluate(self, text: str) -> dict:
+        # 1. Run standard secret / rule detection
+        secret_result = self.secret_detector.validate(text)
+        if secret_result.get("flagged", False):
+            return secret_result
 
-        return GuardrailResult(
-            action=action,
-            flagged=flagged,
-            matched_rules=matched_rules,
-            sanitized_text=text
-        )
+        # 2. Run semantic shield evaluation if available (fail-open if missing/fails)
+        if self.semantic_shield is not None:
+            try:
+                semantic_result = self.semantic_shield.evaluate(text)
+                if semantic_result.get("flagged", False):
+                    return semantic_result
+            except Exception:
+                # Fail-open: ignore semantic errors or missing optional components
+                pass
+
+        return {
+            "action": "ALLOW",
+            "flagged": False,
+            "matched_rules": []
+        }
