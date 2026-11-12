@@ -74,3 +74,20 @@ def test_duplicate_input_endpoint_removed():
         "/v1/guardrails/input", json={"prompt": "Hello"}, headers=headers
     )
     assert response.status_code == 404
+
+
+
+def test_gateway_refuses_to_start_without_api_key(monkeypatch):
+    monkeypatch.delenv("AI_SENTINEL_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="refused to start"):
+        with TestClient(app):
+            pass
+
+
+def test_gateway_starts_with_api_key(monkeypatch):
+    monkeypatch.setenv("AI_SENTINEL_API_KEY", "my-secure-local-key-12345")
+    with TestClient(app) as started:
+        response = started.post(
+            "/v1/guardrails/inspect", json={"prompt": "Hello"}, headers=headers
+        )
+        assert response.status_code == 200

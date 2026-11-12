@@ -5,6 +5,7 @@ Provides inspection and guardrail validation endpoints.
 
 import hmac
 import os
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, Header, HTTPException
@@ -32,7 +33,18 @@ def _key_is_valid(provided: Optional[str]) -> bool:
     )
 
 
-app = FastAPI(title="AI Sentinel Gateway", version="0.9.0")
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    # Fail fast: a gateway without a key would answer 401 to everything, which
+    # looks like a working server. Refuse to start instead.
+    if not os.environ.get("AI_SENTINEL_API_KEY"):
+        raise RuntimeError(
+            "AI-Sentinel refused to start: AI_SENTINEL_API_KEY is not set"
+        )
+    yield
+
+
+app = FastAPI(title="AI Sentinel Gateway", version="0.9.0", lifespan=_lifespan)
 # Only requests with a valid API key count toward the rate limit, so bad-key
 # traffic cannot exhaust a legitimate client's quota.
 app.add_middleware(
