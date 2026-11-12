@@ -25,3 +25,10 @@ jobs:
       - name: Run tests with pytest
         run: |
           pytest -v --tb=short
+  docker-smoke:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Docker smoke test
+        run: scripts/docker_smoke_test.sh

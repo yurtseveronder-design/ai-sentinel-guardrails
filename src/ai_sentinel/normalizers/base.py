@@ -25,38 +25,44 @@ class InputNormalizer:
         normalized = unicodedata.normalize('NFKC', text)
         return "".join(self.homoglyph_map.get(char, char) for char in normalized)
 
-    def _is_valid_base64_token(self, token: str) -> bool:
-        # Base64 tokens must have valid length (multiple of 4 if padded, or reasonable length >= 4)
-        if len(token) < 4 or len(token) % 4 != 0:
-            return False
-        # Check charset
-        b64_regex = r'^[A-Za-z0-9+/]+={0,2}$'
-        if not re.match(b64_regex, token):
-            return False
+    # Shorter tokens are ordinary words far more often than real payloads
+    # ("Show", "test", "code" are all valid Base64).
+    MIN_BASE64_TOKEN_LENGTH = 8
+    MIN_PRINTABLE_RATIO = 0.9
+    MIN_TEXT_RATIO = 0.6  # letters/spaces; real payloads are prose, not symbol noise
+
+    def _try_decode_base64_token(self, token: str):
+        """Return the decoded text if the token is plausible Base64 text, else None."""
+        if len(token) < self.MIN_BASE64_TOKEN_LENGTH or len(token) % 4 != 0:
+            return None
+        if not re.match(r'^[A-Za-z0-9+/]+={0,2}$', token):
+            return None
         try:
-            # Attempt decode to verify
-            decoded_bytes = base64.b64decode(token, validate=True)
-            # Ensure decoded content is valid UTF-8 text (avoid binary noise)
-            decoded_bytes.decode('utf-8')
-            return True
+            decoded = base64.b64decode(token, validate=True).decode('utf-8')
         except Exception:
-            return False
+            return None
+        if not decoded:
+            return None
+        printable = sum(1 for ch in decoded if ch.isprintable() or ch.isspace())
+        if printable / len(decoded) < self.MIN_PRINTABLE_RATIO:
+            return None
+        texty = sum(1 for ch in decoded if ch.isalpha() or ch.isspace())
+        if texty / len(decoded) < self.MIN_TEXT_RATIO:
+            return None
+        return decoded
 
     def decode_base64_tokens(self, text: str) -> str:
-        # Split text into tokens by whitespace/punctuation boundaries
+        """Append the decoded form after each plausible Base64 token.
+
+        The original token is kept, so a normal word that happens to look like
+        Base64 is never replaced by garbage.
+        """
         tokens = re.findall(r'\S+|\s+', text)
-        decoded_tokens = []
+        out = []
         for token in tokens:
-            if self._is_valid_base64_token(token):
-                try:
-                    decoded_bytes = base64.b64decode(token)
-                    decoded_str = decoded_bytes.decode('utf-8', errors='ignore')
-                    decoded_tokens.append(decoded_str)
-                except Exception:
-                    decoded_tokens.append(token)
-            else:
-                decoded_tokens.append(token)
-        return "".join(decoded_tokens)
+            decoded = self._try_decode_base64_token(token)
+            out.append(token if decoded is None else f"{token} {decoded}")
+        return "".join(out)
 
     def normalize(self, text: str) -> dict:
         if not text:

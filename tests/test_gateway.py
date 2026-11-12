@@ -43,3 +43,51 @@ def test_homoglyph_obfuscation():
     data = response.json()
     assert data["action"] == "BLOCK"
     assert "prompt_injection_override" in data["matched_rules"]
+
+
+def test_missing_api_key_is_rejected():
+    response = client.post("/v1/guardrails/inspect", json={"prompt": "Hello"})
+    assert response.status_code == 401
+
+
+def test_wrong_api_key_is_rejected():
+    response = client.post(
+        "/v1/guardrails/inspect",
+        json={"prompt": "Hello"},
+        headers={"x-api-key": "wrong-key"},
+    )
+    assert response.status_code == 401
+
+
+def test_output_endpoint_blocks_secret_leak():
+    response = client.post(
+        "/v1/guardrails/output",
+        json={"response_text": "Sure, the key is sk-proj-1234567890abcdef"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.json()["action"] == "BLOCK"
+
+
+def test_duplicate_input_endpoint_removed():
+    response = client.post(
+        "/v1/guardrails/input", json={"prompt": "Hello"}, headers=headers
+    )
+    assert response.status_code == 404
+
+
+
+def test_gateway_refuses_to_start_without_api_key(monkeypatch):
+    monkeypatch.delenv("AI_SENTINEL_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="refused to start"):
+        with TestClient(app):
+            pass
+
+
+def test_gateway_starts_with_api_key(monkeypatch):
+    monkeypatch.setenv("AI_SENTINEL_API_KEY", "my-secure-local-key-12345")
+    with TestClient(app) as started:
+        response = started.post(
+            "/v1/guardrails/inspect", json={"prompt": "Hello"}, headers=headers
+        )
+        assert response.status_code == 200

@@ -65,7 +65,21 @@ class SecretDetectorPlugin:
                     "AI-Sentinel refused to start: threat signatures file has an "
                     f"invalid pattern ({rule_id})"
                 ) from exc
-            loaded.append({"id": rule_id, "pattern": compiled})
+            action = str(rule.get("action", "block")).lower()
+            if action not in ("block", "flag"):
+                raise RuntimeError(
+                    "AI-Sentinel refused to start: threat signatures file has an "
+                    f"invalid action ({rule_id})"
+                )
+            validator = rule.get("validator")
+            if validator not in (None, "luhn"):
+                raise RuntimeError(
+                    "AI-Sentinel refused to start: threat signatures file has an "
+                    f"unknown validator ({rule_id})"
+                )
+            loaded.append(
+                {"id": rule_id, "pattern": compiled, "action": action, "validator": validator}
+            )
 
         if not loaded:
             raise RuntimeError(
@@ -85,13 +99,39 @@ class SecretDetectorPlugin:
             entropy -= probability * math.log2(probability)
         return entropy
 
+    @staticmethod
+    def _luhn_ok(candidate: str) -> bool:
+        digits = [int(c) for c in candidate if c.isdigit()]
+        if not 13 <= len(digits) <= 19:
+            return False
+        total = 0
+        for index, digit in enumerate(reversed(digits)):
+            if index % 2 == 1:
+                digit *= 2
+                if digit > 9:
+                    digit -= 9
+            total += digit
+        return total % 10 == 0
+
+    def _rule_matches(self, rule: dict, text: str) -> bool:
+        for match in rule["pattern"].finditer(text):
+            if rule["validator"] == "luhn" and not self._luhn_ok(match.group(0)):
+                continue
+            return True
+        return False
+
     def validate(self, text: str, strict: bool = False) -> dict:
         matched_rules = []
+        flagged_only = []
         reasons = []
 
         for rule in self.rules:
-            if rule["pattern"].search(text):
-                matched_rules.append(rule["id"])
+            if self._rule_matches(rule, text):
+                if rule["action"] == "flag":
+                    flagged_only.append(rule["id"])
+                    reasons.append(f"flagged_rule:{rule['id']}")
+                else:
+                    matched_rules.append(rule["id"])
 
         entropy_val = self._calculate_entropy(text)
         is_high_entropy = entropy_val > 4.5
@@ -110,7 +150,7 @@ class SecretDetectorPlugin:
             should_block = True
             action = "BLOCK"
             risk_level = "MEDIUM"
-        elif is_high_entropy:
+        elif is_high_entropy or flagged_only:
             risk_level = "MEDIUM"
 
         return {
