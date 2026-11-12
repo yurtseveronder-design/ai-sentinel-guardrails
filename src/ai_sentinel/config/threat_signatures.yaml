@@ -1,20 +1,68 @@
+# Threat signatures. Patterns are case-insensitive regexes run on normalized text.
+#
+# Optional per-rule fields:
+#   action:    block (default) | flag
+#              "flag" reports the rule and raises risk to MEDIUM but does not block
+#              (use it, for example, to allow email addresses through).
+#   validator: luhn
+#              the match must also pass a Luhn checksum (credit card numbers).
 rules:
+  # --- Secrets -------------------------------------------------------------
   - id: "api_key_secret_leak"
-    pattern: "sk-[a-zA-Z0-9_-]{15,}"
-    description: "Detects OpenAI and generic secret API keys"
+    pattern: 'sk-[a-zA-Z0-9_-]{15,}'
+    description: "OpenAI and generic secret API keys"
 
-  - id: "email_pii_leak"
-    pattern: "[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+"
-    description: "Detects email addresses (PII)"
+  - id: "aws_access_key"
+    pattern: '\b(?:AKIA|ASIA)[0-9A-Z]{16}\b'
+    description: "AWS access key IDs"
 
-  - id: "prompt_injection_override"
-    pattern: "(?i)(ignore previous instructions|system\\s*prompt\\s*override)"
-    description: "Detects common prompt injection and instruction override attempts"
+  - id: "github_token"
+    pattern: '\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})\b'
+    description: "GitHub personal access and OAuth tokens"
+
+  - id: "slack_token"
+    pattern: '\bxox[baprs]-[A-Za-z0-9-]{10,}'
+    description: "Slack tokens"
+
+  - id: "private_key_block"
+    pattern: '-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY(?: BLOCK)?-----'
+    description: "PEM / PGP private key headers"
 
   - id: "secret_keyword"
-    pattern: "(?i)\\bsecret\\b"
-    description: "Detects the credential word secret after homoglyph folding"
+    pattern: '\b(?:secret|password|passwd|pwd|api[ _-]?key|access[ _-]?token)\b\s*[=:]\s*\S{4,}|\b(?:secret|password|passwd|pwd|api[ _-]?key|access[ _-]?token)\b(?:\s+\w+){0,2}\s+is\s+\S*\d\S*'
+    description: "A credential word followed by an assigned value (password is x1, secret=abcd). The bare word 'secret' is allowed."
+
+  # --- PII -----------------------------------------------------------------
+  - id: "email_pii_leak"
+    pattern: '[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+'
+    description: "Email addresses (set action: flag to allow them through)"
+
+  - id: "credit_card_number"
+    pattern: '\b(?:\d[ -]?){12,18}\d\b'
+    validator: luhn
+    description: "13-19 digit card numbers that pass the Luhn check"
+
+  - id: "us_ssn"
+    pattern: '\b(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b'
+    description: "US Social Security numbers"
+
+  # --- Prompt injection ----------------------------------------------------
+  - id: "prompt_injection_override"
+    pattern: 'ignore previous instructions|system\s*prompt\s*override'
+    description: "Classic instruction override"
+
+  - id: "prompt_injection_disregard"
+    pattern: '\b(?:ignore|disregard|forget|override|bypass)\s+(?:all\s+|any\s+|the\s+|your\s+|every\s+)?(?:previous|prior|above|earlier|preceding|existing|safety)\s+(?:instructions?|rules|prompts?|directions|guidelines|context|restrictions)|\bforget\s+everything(?:\s+(?:above|before|you\s+were\s+told))?'
+    description: "Paraphrased instruction override (disregard / forget / bypass ...)"
+
+  - id: "prompt_injection_persona"
+    pattern: '\byou\s+are\s+now\s+(?:dan\b|in\s+developer\s+mode|an?\s+(?:unrestricted|unfiltered|jailbroken))|\bdeveloper\s+mode\b|\bjailbreak(?:ed)?\b|\b(?:no|without\s+any)\s+(?:restrictions|safety\s+filters)\b'
+    description: "Persona / jailbreak framing (DAN, developer mode, no restrictions)"
+
+  - id: "prompt_injection_exfiltration"
+    pattern: '\b(?:reveal|show|print|repeat|dump|leak|output)\s+(?:me\s+)?(?:all\s+)?(?:of\s+)?(?:your|the)\s+(?:hidden\s+|system\s+|secret\s+|initial\s+|original\s+)?(?:prompt|instructions)'
+    description: "Attempts to extract the system prompt"
 
   - id: "system_attack_instruction"
-    pattern: "(?i)configure your system as an attacker"
-    description: "Detects the decoded instruction to configure the system as an attacker"
+    pattern: 'configure your system as an attacker'
+    description: "Decoded instruction to configure the system as an attacker"

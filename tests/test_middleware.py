@@ -44,3 +44,41 @@ def test_rate_limiting_trigger():
     # Request 3: Should trigger 429 Rate Limit Exceeded
     r3 = tc.post("/test-limit")
     assert r3.status_code == 429
+
+
+def test_unauthenticated_requests_do_not_use_up_quota():
+    from fastapi import FastAPI
+    from ai_sentinel.middleware.telemetry import TelemetryAndRateLimitMiddleware
+
+    test_app = FastAPI()
+    test_app.add_middleware(
+        TelemetryAndRateLimitMiddleware,
+        max_requests=2,
+        window_seconds=60,
+        is_authenticated=lambda request: request.headers.get("x-api-key") == "good",
+    )
+
+    @test_app.post("/t")
+    def route():
+        return {"status": "ok"}
+
+    tc = TestClient(test_app)
+    for _ in range(10):
+        assert tc.post("/t", headers={"x-api-key": "bad"}).status_code == 200
+    # Bad-key traffic did not consume the quota, so a real client still gets in.
+    assert tc.post("/t", headers={"x-api-key": "good"}).status_code == 200
+    assert tc.post("/t", headers={"x-api-key": "good"}).status_code == 200
+    blocked = tc.post("/t", headers={"x-api-key": "good"})
+    assert blocked.status_code == 429
+    assert "retry-after" in blocked.headers
+
+
+def test_idle_clients_are_swept():
+    import asyncio
+    from ai_sentinel.middleware.telemetry import TelemetryAndRateLimitMiddleware
+
+    mw = TelemetryAndRateLimitMiddleware(app=None, max_requests=5, window_seconds=1)
+    mw.request_counts = {"1.1.1.1": [0.0], "2.2.2.2": [10**10]}
+    mw._sweep(now=100.0)
+    assert "1.1.1.1" not in mw.request_counts
+    assert "2.2.2.2" in mw.request_counts

@@ -13,8 +13,35 @@ from pydantic import BaseModel
 from ai_sentinel.core.shield import SecurityShield
 from ai_sentinel.middleware.telemetry import TelemetryAndRateLimitMiddleware
 
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _key_is_valid(provided: Optional[str]) -> bool:
+    expected = os.environ.get("AI_SENTINEL_API_KEY")
+    if not isinstance(expected, str) or not expected:
+        return False
+    return hmac.compare_digest(
+        (provided if isinstance(provided, str) else "").encode("utf-8"),
+        expected.encode("utf-8"),
+    )
+
+
 app = FastAPI(title="AI Sentinel Gateway", version="0.9.0")
-app.add_middleware(TelemetryAndRateLimitMiddleware)
+# Only requests with a valid API key count toward the rate limit, so bad-key
+# traffic cannot exhaust a legitimate client's quota.
+app.add_middleware(
+    TelemetryAndRateLimitMiddleware,
+    max_requests=_env_int("AI_SENTINEL_RATE_LIMIT", 60),
+    window_seconds=_env_int("AI_SENTINEL_RATE_WINDOW", 60),
+    is_authenticated=lambda request: _key_is_valid(request.headers.get("x-api-key")),
+    trust_proxy=os.environ.get("AI_SENTINEL_TRUST_PROXY", "").lower() in ("1", "true", "yes"),
+)
 shield = SecurityShield()
 
 
@@ -28,9 +55,7 @@ class OutputRequest(BaseModel):
 
 
 def _require_api_key(x_api_key: Optional[str]) -> None:
-    expected = os.environ.get("AI_SENTINEL_API_KEY")
-    provided = x_api_key if isinstance(x_api_key, str) else ""
-    if not isinstance(expected, str) or not expected or not hmac.compare_digest(provided, expected):
+    if not _key_is_valid(x_api_key):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
@@ -45,13 +70,6 @@ def _public_verdict(result: dict) -> dict:
 
 @app.post("/v1/guardrails/inspect")
 def guardrail_inspect(payload: InspectRequest, x_api_key: Optional[str] = Header(default=None)):
-    _require_api_key(x_api_key)
-    result = shield.evaluate(payload.prompt, history=payload.history)
-    return _public_verdict(result)
-
-
-@app.post("/v1/guardrails/input")
-def guardrail_input(payload: InspectRequest, x_api_key: Optional[str] = Header(default=None)):
     _require_api_key(x_api_key)
     result = shield.evaluate(payload.prompt, history=payload.history)
     return _public_verdict(result)

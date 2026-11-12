@@ -8,16 +8,15 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "pydantic",
-    "PyYAML",
-    "requests"
+    "PyYAML"
 ]
 
 [project.optional-dependencies]
 test = [
     "pytest",
     "pytest-cov",
-    "deepeval",
-    "hypothesis"
+    "hypothesis",
+    "httpx"
 ]
 
 [build-system]
@@ -36,4 +35,3 @@ addopts = "-ra -q"
 testpaths = [
     "tests",
 ]
-asyncio_mode = "strict"
