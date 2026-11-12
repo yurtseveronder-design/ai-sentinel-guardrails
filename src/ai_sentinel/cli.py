@@ -31,6 +31,8 @@ def main():
         print(f"Action: {action}")
         print(f"Risk Level: {risk_level}")
         print(f"Matched Rules: {matched_rules}")
+        if action == "REDACT":
+            print(f"Sanitized Text: {result.get('sanitized_text')}")
         sys.exit(1 if action == "BLOCK" else 0)
 
 

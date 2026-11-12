@@ -26,31 +26,21 @@ _RULE_IDS = {
 
 
 def _parameters():
-    parameters = []
-    for index, item in enumerate(_CASES):
-        case_id = f"{index}-{item['category']}"
-        if item["category"] == "multilingual_injection":
-            parameters.append(
-                pytest.param(
-                    item,
-                    id=case_id,
-                    marks=pytest.mark.xfail(
-                        reason="Multilingual instruction signatures are not implemented",
-                        strict=True,
-                    ),
-                )
-            )
-        else:
-            parameters.append(pytest.param(item, id=case_id))
-    return parameters
+    return [
+        pytest.param(item, id=f"{index}-{item['category']}")
+        for index, item in enumerate(_CASES)
+    ]
 
 
 @pytest.mark.parametrize("item", _parameters())
 def test_adversarial_case(item):
     result = SecurityShield().evaluate(item["prompt"])
     expected_rule = _RULE_IDS[item["category"]]
-    if item["expected_blocked"]:
-        assert result["action"] == "BLOCK"
+    expected_action = item.get(
+        "expected_action", "BLOCK" if item["expected_blocked"] else "ALLOW"
+    )
+    if expected_action != "ALLOW":
+        assert result["action"] == expected_action
         assert expected_rule in result["matched_rules"]
     else:
         assert result["action"] == "ALLOW"

@@ -55,6 +55,8 @@ class SecurityShield:
             if delta_result.get("flagged", False):
                 matched_rules.extend(delta_result.get("matched_rules", []))
 
+        redacted_rules = detector_result.get("redacted_rules", [])
+
         if matched_rules or (strict and risk_level == "MEDIUM"):
             return {
                 "action": "BLOCK",
@@ -62,6 +64,18 @@ class SecurityShield:
                 "risk_level": "HIGH" if matched_rules else "MEDIUM",
                 "matched_rules": list(dict.fromkeys(matched_rules)),
                 "reasons": reasons,
+            }
+
+        if redacted_rules:
+            # Nothing blocks, but sensitive data was found: pass the text on
+            # with those parts replaced.
+            return {
+                "action": "REDACT",
+                "flagged": True,
+                "risk_level": "MEDIUM",
+                "matched_rules": list(redacted_rules),
+                "reasons": reasons,
+                "sanitized_text": detector_result.get("sanitized_text"),
             }
 
         return {

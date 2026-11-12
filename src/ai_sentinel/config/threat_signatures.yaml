@@ -1,9 +1,13 @@
 # Threat signatures. Patterns are case-insensitive regexes run on normalized text.
 #
 # Optional per-rule fields:
-#   action:    block (default) | flag
-#              "flag" reports the rule and raises risk to MEDIUM but does not block
-#              (use it, for example, to allow email addresses through).
+#   action:    block (default) | redact | flag
+#              block  - reject the whole text.
+#              redact - replace only the matched part with `replacement`
+#                       (default "[REDACTED]") and return action REDACT with
+#                       sanitized_text. A blocking rule elsewhere still wins.
+#              flag   - report the rule and raise risk to MEDIUM, nothing else.
+#   replacement: text that replaces a match (redact only)
 #   validator: luhn
 #              the match must also pass a Luhn checksum (credit card numbers).
 rules:
@@ -35,16 +39,22 @@ rules:
   # --- PII -----------------------------------------------------------------
   - id: "email_pii_leak"
     pattern: '[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+'
-    description: "Email addresses (set action: flag to allow them through)"
+    action: redact
+    replacement: "[EMAIL]"
+    description: "Email addresses (redacted; use action: block to reject, flag to allow)"
 
   - id: "credit_card_number"
     pattern: '\b(?:\d[ -]?){12,18}\d\b'
     validator: luhn
-    description: "13-19 digit card numbers that pass the Luhn check"
+    action: redact
+    replacement: "[CARD]"
+    description: "13-19 digit card numbers that pass the Luhn check (redacted)"
 
   - id: "us_ssn"
     pattern: '\b(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b'
-    description: "US Social Security numbers"
+    action: redact
+    replacement: "[SSN]"
+    description: "US Social Security numbers (redacted)"
 
   # --- Prompt injection ----------------------------------------------------
   - id: "prompt_injection_override"
@@ -52,7 +62,7 @@ rules:
     description: "Classic instruction override"
 
   - id: "prompt_injection_disregard"
-    pattern: '\b(?:ignore|disregard|forget|override|bypass)\s+(?:all\s+|any\s+|the\s+|your\s+|every\s+)?(?:previous|prior|above|earlier|preceding|existing|safety)\s+(?:instructions?|rules|prompts?|directions|guidelines|context|restrictions)|\bforget\s+everything(?:\s+(?:above|before|you\s+were\s+told))?'
+    pattern: '\b(?:ignore|disregard|forget|override|bypass)\s+(?:all\s+|any\s+|the\s+|your\s+|every\s+)?(?:previous|prior|above|earlier|preceding|existing|safety)\s+(?:instructions?|rules|prompts?|directions|guidelines|context|restrictions)|\bforget\s+everything(?:\s+(?:above|before|you\s+were\s+told))?|\b(?:ignore|disregard)\s+(?:all|any|every|your)\s+(?:the\s+)?(?:rules|instructions|guidelines|restrictions)'
     description: "Paraphrased instruction override (disregard / forget / bypass ...)"
 
   - id: "prompt_injection_persona"
@@ -66,3 +76,22 @@ rules:
   - id: "system_attack_instruction"
     pattern: 'configure your system as an attacker'
     description: "Decoded instruction to configure the system as an attacker"
+
+  # --- Prompt injection in other languages -----------------------------------
+  # All use the id "multilingual_instruction". Languages covered: German,
+  # Turkish, Spanish, French. Others (Russian, Arabic, CJK, ...) are not covered.
+  - id: "multilingual_instruction"
+    pattern: '\bignorier\w*\s+(?:\w+\s+){0,3}?(?:anweisungen|regeln|instruktionen|vorgaben|befehle|richtlinien)|\bvergiss\s+(?:\w+\s+){0,3}?(?:anweisungen|regeln|instruktionen|vorgaben|befehle|richtlinien)|\b(?:zeig|lueg|lüg|verrat|offenleg|nenn|gib|druck)\w*\s+(?:\w+\s+){0,4}?(?:system-?anweisung|system-?prompt|systemnachricht)|\bentwickler-?modus\b'
+    description: "German: ignore/forget instructions, reveal system prompt, developer mode"
+
+  - id: "multilingual_instruction"
+    pattern: '(?:talimat|kural|komut|y[öo]nerge)\w*\s+(?:\w+\s+){0,2}?(?:yok\s+say|unut|g[öo]rmezden\s+gel|[çc]i[ğg]ne)|sistem\s+(?:istem|prompt|talimat|mesaj)\w*\s+(?:\w+\s+){0,2}?(?:g[öo]ster|s[öo]yle|yaz|ver|a[çc][ıi]kla|payla[şs]|ortaya)|geli[şs]tirici\s+modu'
+    description: "Turkish: ignore/forget instructions, reveal system prompt, developer mode"
+
+  - id: "multilingual_instruction"
+    pattern: '\b(?:ignora|ignore|olvida|descarta|omite)\s+(?:todas?\s+)?(?:las\s+|tus\s+|mis\s+)?(?:instrucciones|reglas|indicaciones|directrices)\b|\b(?:muestra|revela|dime|imprime)\w*\s+(?:\w+\s+){0,3}?(?:prompt\s+del\s+sistema|instrucciones\s+del\s+sistema|instrucciones\s+ocultas)|\bmodo\s+desarrollador\b'
+    description: "Spanish: ignore/forget instructions, reveal system prompt, developer mode"
+
+  - id: "multilingual_instruction"
+    pattern: '\b(?:ignore|ignorez|oublie|oubliez)\s+(?:toutes?\s+)?(?:les\s+|tes\s+|vos\s+)?(?:instructions|r[èe]gles|consignes)\b|\b(?:montre|affiche|r[ée]v[èe]le|donne)\w*\s+(?:\w+\s+){0,3}?(?:prompt\s+syst[èe]me|instructions\s+syst[èe]me|consignes\s+syst[èe]me)|\bmode\s+d[ée]veloppeur\b'
+    description: "French: ignore/forget instructions, reveal system prompt, developer mode"
