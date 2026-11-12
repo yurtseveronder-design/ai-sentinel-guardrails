@@ -72,12 +72,15 @@ def _require_api_key(x_api_key: Optional[str]) -> None:
 
 
 def _public_verdict(result: dict) -> dict:
-    return {
+    verdict = {
         "action": result.get("action", "ALLOW"),
         "flagged": result.get("flagged", False),
         "risk_level": result.get("risk_level", "LOW"),
         "matched_rules": result.get("matched_rules", []),
     }
+    if verdict["action"] == "REDACT":
+        verdict["sanitized_text"] = result.get("sanitized_text")
+    return verdict
 
 
 @app.post("/v1/guardrails/inspect")

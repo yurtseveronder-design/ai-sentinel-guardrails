@@ -66,7 +66,7 @@ class SecretDetectorPlugin:
                     f"invalid pattern ({rule_id})"
                 ) from exc
             action = str(rule.get("action", "block")).lower()
-            if action not in ("block", "flag"):
+            if action not in ("block", "flag", "redact"):
                 raise RuntimeError(
                     "AI-Sentinel refused to start: threat signatures file has an "
                     f"invalid action ({rule_id})"
@@ -78,7 +78,13 @@ class SecretDetectorPlugin:
                     f"unknown validator ({rule_id})"
                 )
             loaded.append(
-                {"id": rule_id, "pattern": compiled, "action": action, "validator": validator}
+                {
+                    "id": rule_id,
+                    "pattern": compiled,
+                    "action": action,
+                    "validator": validator,
+                    "replacement": str(rule.get("replacement") or "[REDACTED]"),
+                }
             )
 
         if not loaded:
@@ -120,18 +126,34 @@ class SecretDetectorPlugin:
             return True
         return False
 
+    def _redact(self, rule: dict, text: str) -> str:
+        def replace(match):
+            if rule["validator"] == "luhn" and not self._luhn_ok(match.group(0)):
+                return match.group(0)
+            return rule["replacement"]
+
+        return rule["pattern"].sub(replace, text)
+
     def validate(self, text: str, strict: bool = False) -> dict:
-        matched_rules = []
-        flagged_only = []
+        matched_rules = []   # rules that block
+        redacted_rules = []  # rules that were redacted out of the text
+        flagged_only = []    # rules that only report
         reasons = []
+        sanitized = text
 
         for rule in self.rules:
-            if self._rule_matches(rule, text):
-                if rule["action"] == "flag":
-                    flagged_only.append(rule["id"])
-                    reasons.append(f"flagged_rule:{rule['id']}")
-                else:
-                    matched_rules.append(rule["id"])
+            if not self._rule_matches(rule, text):
+                continue
+            rule_id = rule["id"]
+            if rule["action"] == "flag":
+                flagged_only.append(rule_id)
+                reasons.append(f"flagged_rule:{rule_id}")
+            elif rule["action"] == "redact":
+                if rule_id not in redacted_rules:
+                    redacted_rules.append(rule_id)
+                sanitized = self._redact(rule, sanitized)
+            elif rule_id not in matched_rules:
+                matched_rules.append(rule_id)
 
         entropy_val = self._calculate_entropy(text)
         is_high_entropy = entropy_val > 4.5
@@ -140,23 +162,34 @@ class SecretDetectorPlugin:
 
         action = "ALLOW"
         risk_level = "LOW"
-        should_block = False
+        should_flag = False
 
         if matched_rules:
-            should_block = True
+            should_flag = True
             action = "BLOCK"
             risk_level = "HIGH"
+            sanitized = None
         elif is_high_entropy and strict:
-            should_block = True
+            should_flag = True
             action = "BLOCK"
+            risk_level = "MEDIUM"
+            sanitized = None
+        elif redacted_rules:
+            should_flag = True
+            action = "REDACT"
             risk_level = "MEDIUM"
         elif is_high_entropy or flagged_only:
             risk_level = "MEDIUM"
+            sanitized = None
+        else:
+            sanitized = None
 
         return {
             "action": action,
-            "flagged": should_block,
+            "flagged": should_flag,
             "risk_level": risk_level,
             "matched_rules": matched_rules,
+            "redacted_rules": redacted_rules,
+            "sanitized_text": sanitized,
             "reasons": reasons,
         }
